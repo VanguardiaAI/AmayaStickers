@@ -9,11 +9,20 @@ interface StickerResultProps {
 
 export default function StickerResult({ imageUrl, onNewSticker }: StickerResultProps) {
   const [isDownloading, setIsDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState(false)
 
   const handleDownload = async () => {
     setIsDownloading(true)
+    setDownloadError(false)
+
     try {
-      const response = await fetch(imageUrl)
+      // Intentar descargar via fetch (puede fallar por CORS)
+      const response = await fetch(imageUrl, { mode: 'cors' })
+
+      if (!response.ok) {
+        throw new Error('CORS blocked')
+      }
+
       const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
@@ -25,9 +34,17 @@ export default function StickerResult({ imageUrl, onNewSticker }: StickerResultP
       window.URL.revokeObjectURL(url)
     } catch (error) {
       console.error('Error al descargar:', error)
+      // Si CORS falla, abrir en nueva pestaña
+      setDownloadError(true)
+      window.open(imageUrl, '_blank')
     } finally {
       setIsDownloading(false)
     }
+  }
+
+  // Alternativa: abrir directamente en nueva pestaña
+  const handleOpenInNewTab = () => {
+    window.open(imageUrl, '_blank')
   }
 
   return (
@@ -51,6 +68,12 @@ export default function StickerResult({ imageUrl, onNewSticker }: StickerResultP
           ✂️
         </div>
       </div>
+
+      {downloadError && (
+        <p className="text-sm text-gray-500 text-center">
+          Se abrió en una nueva pestaña. Mantén presionada la imagen para guardarla 📱
+        </p>
+      )}
 
       <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md">
         <button
@@ -78,6 +101,14 @@ export default function StickerResult({ imageUrl, onNewSticker }: StickerResultP
           <span>🔄</span> Hacer Otro
         </button>
       </div>
+
+      {/* Botón alternativo para móvil */}
+      <button
+        onClick={handleOpenInNewTab}
+        className="text-purple-500 text-sm underline hover:text-purple-700"
+      >
+        ¿No descarga? Toca aquí para abrir la imagen
+      </button>
     </div>
   )
 }
