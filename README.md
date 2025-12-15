@@ -5,7 +5,7 @@ Aplicación web para transformar fotos en stickers imprimibles usando inteligenc
 ## Características
 
 - **Autenticación simple**: PIN de 6 dígitos con sesión persistente (7 días)
-- **Subida de imágenes**: Drag & drop o selección de archivos (JPG, PNG, WebP hasta 10MB)
+- **Subida de imágenes**: Drag & drop o selección de archivos (JPG, PNG, WebP hasta 4MB)
 - **3 estilos de sticker**:
   - ✨ Mágico (estilo cartoon)
   - 📸 Como Foto (estilo realista)

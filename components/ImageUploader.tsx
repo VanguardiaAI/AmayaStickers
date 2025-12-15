@@ -8,7 +8,7 @@ interface ImageUploaderProps {
   disabled?: boolean
 }
 
-const MAX_SIZE_MB = 10
+const MAX_SIZE_MB = 4
 const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
@@ -119,7 +119,7 @@ export default function ImageUploader({ onImageSelect, currentPreview, disabled 
               </p>
             </div>
             <p className="text-sm text-gray-400 mt-2">
-              JPG, PNG o WebP • Máximo 10MB
+              JPG, PNG o WebP • Máximo 4MB
             </p>
           </div>
         )}

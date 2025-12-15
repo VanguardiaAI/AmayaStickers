@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 
+// Configuración para Vercel - extender timeout y tamaño del body
+export const maxDuration = 60 // 60 segundos máximo (requiere plan Pro para más)
+export const dynamic = 'force-dynamic'
+
 const COOKIE_NAME = 'amaya_session'
 const KIE_API_URL = 'https://api.kie.ai/api/v1/jobs/createTask'
 const KIE_STATUS_URL = 'https://api.kie.ai/api/v1/jobs/recordInfo'
@@ -24,9 +28,57 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+// Subir imagen a un servicio temporal y obtener URL pública
+async function uploadImageToTempHost(imageBuffer: Buffer, filename: string, mimeType: string): Promise<string | null> {
+  try {
+    // Convertir Buffer a Uint8Array para compatibilidad con Blob
+    const uint8Array = new Uint8Array(imageBuffer)
+
+    // Usar file.io como servicio de hosting temporal (la imagen expira después de una descarga)
+    const formData = new FormData()
+    const blob = new Blob([uint8Array], { type: mimeType })
+    formData.append('file', blob, filename)
+
+    const response = await fetch('https://file.io', {
+      method: 'POST',
+      body: formData,
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      if (data.success && data.link) {
+        return data.link
+      }
+    }
+
+    // Fallback: intentar con tmpfiles.org
+    const tmpFormData = new FormData()
+    tmpFormData.append('file', blob, filename)
+
+    const tmpResponse = await fetch('https://tmpfiles.org/api/v1/upload', {
+      method: 'POST',
+      body: tmpFormData,
+    })
+
+    if (tmpResponse.ok) {
+      const tmpData = await tmpResponse.json()
+      if (tmpData.status === 'success' && tmpData.data?.url) {
+        // tmpfiles.org devuelve URLs como https://tmpfiles.org/123456/imagen.png
+        // pero la URL directa es https://tmpfiles.org/dl/123456/imagen.png
+        return tmpData.data.url.replace('tmpfiles.org/', 'tmpfiles.org/dl/')
+      }
+    }
+
+    return null
+  } catch (error) {
+    console.error('Error subiendo imagen a host temporal:', error)
+    return null
+  }
+}
+
 // Consultar estado de la tarea
 async function checkTaskStatus(taskId: string, apiKey: string): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
-  const maxAttempts = 60 // Máximo 60 intentos (2 minutos con 2s de espera)
+  const maxAttempts = 25 // Máximo 25 intentos (50 segundos con 2s de espera)
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
@@ -129,26 +181,32 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validar tamaño (10MB)
-    if (image.size > 10 * 1024 * 1024) {
+    // Validar tamaño (4MB para evitar problemas con el límite de Vercel)
+    const maxSize = 4 * 1024 * 1024
+    if (image.size > maxSize) {
       return NextResponse.json(
         { error: 'Esta foto es muy grande, prueba con otra más pequeña 📸' },
         { status: 400 }
       )
     }
 
-    // Convertir imagen a base64 para subirla
-    const imageBuffer = await image.arrayBuffer()
-    const base64Image = Buffer.from(imageBuffer).toString('base64')
-    const dataUrl = `data:${image.type};base64,${base64Image}`
+    // Convertir imagen a buffer
+    const imageBuffer = Buffer.from(await image.arrayBuffer())
 
-    // Primero necesitamos subir la imagen a algún lugar accesible
-    // Como la API de Kie.ai requiere URLs, usaremos un enfoque diferente:
-    // Enviaremos la imagen como data URL y veremos si funciona,
-    // o la subiremos a un servicio temporal
+    // Subir imagen a servicio temporal para obtener URL pública
+    const extension = image.type.split('/')[1] || 'png'
+    const tempFilename = `sticker-${Date.now()}.${extension}`
+    const publicImageUrl = await uploadImageToTempHost(imageBuffer, tempFilename, image.type)
 
-    // Para este caso, intentaremos enviar directamente el data URL
-    // Si no funciona, habrá que usar un servicio de almacenamiento
+    if (!publicImageUrl) {
+      console.error('No se pudo subir la imagen a un host temporal')
+      return NextResponse.json(
+        { error: '¡Ups! No pudimos procesar la foto 😅 ¡Intenta de nuevo!' },
+        { status: 500 }
+      )
+    }
+
+    console.log('Imagen subida a:', publicImageUrl)
 
     // Crear tarea en Kie.ai
     const createTaskResponse = await fetch(KIE_API_URL, {
@@ -161,7 +219,7 @@ export async function POST(request: NextRequest) {
         model: 'google/nano-banana-edit',
         input: {
           prompt: STYLE_PROMPTS[style],
-          image_urls: [dataUrl],
+          image_urls: [publicImageUrl],
           output_format: 'png',
           image_size: '1:1',
         },
@@ -170,7 +228,7 @@ export async function POST(request: NextRequest) {
 
     if (!createTaskResponse.ok) {
       const errorText = await createTaskResponse.text()
-      console.error('Error creando tarea:', errorText)
+      console.error('Error creando tarea en Kie.ai:', createTaskResponse.status, errorText)
 
       // Manejar errores específicos de la API
       if (createTaskResponse.status === 401) {
@@ -199,9 +257,10 @@ export async function POST(request: NextRequest) {
     }
 
     const createTaskData = await createTaskResponse.json()
+    console.log('Respuesta de Kie.ai:', createTaskData)
 
     if (createTaskData.code !== 200 || !createTaskData.data?.taskId) {
-      console.error('Respuesta inesperada:', createTaskData)
+      console.error('Respuesta inesperada de Kie.ai:', createTaskData)
       return NextResponse.json(
         { error: '¡Ups! El sticker no salió bien 😅 ¡Intenta de nuevo!' },
         { status: 500 }
@@ -210,6 +269,8 @@ export async function POST(request: NextRequest) {
 
     // Esperar y verificar el resultado
     const taskId = createTaskData.data.taskId
+    console.log('Task ID:', taskId)
+
     const result = await checkTaskStatus(taskId, apiKey)
 
     if (result.success && result.imageUrl) {
