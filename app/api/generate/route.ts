@@ -7,11 +7,11 @@ const COOKIE_NAME = 'amaya_session'
 const KIE_API_URL = 'https://api.kie.ai/api/v1/jobs/createTask'
 const KIE_STATUS_URL = 'https://api.kie.ai/api/v1/jobs/recordInfo'
 
-// Mapeo de estilos a prompts
+// Mapeo de estilos a prompts - más específicos para generar stickers
 const STYLE_PROMPTS: Record<string, string> = {
-  cartoon: 'Generate a sticker with white background in cartoon style, with a dashed cut line around the sticker edge',
-  realistic: 'Generate a sticker with white background in realistic style, with a dashed cut line around the sticker edge',
-  anime: 'Generate a sticker with white background in anime style, with a dashed cut line around the sticker edge',
+  cartoon: 'Transform this image into a cute cartoon sticker. Remove the background completely and replace it with solid white. Apply a fun cartoon/illustrated style with bold outlines and vibrant colors. Add a dashed cutting line border around the sticker edge. Make it look like a printable die-cut sticker.',
+  realistic: 'Convert this image into a realistic photo sticker. Remove the background completely and replace it with solid white. Keep the realistic look but enhance colors slightly. Add a dashed cutting line border around the sticker edge. Make it look like a printable die-cut sticker.',
+  anime: 'Transform this image into an anime/manga style sticker. Remove the background completely and replace it with solid white. Apply Japanese anime art style with big expressive features and clean lines. Add a dashed cutting line border around the sticker edge. Make it look like a printable die-cut sticker.',
 }
 
 // Verificar autenticación
