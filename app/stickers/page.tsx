@@ -112,30 +112,73 @@ export default function StickersPage() {
     setError(null)
 
     try {
+      // Paso 1: Crear la tarea
       const formData = new FormData()
       formData.append('image', selectedFile)
       formData.append('style', selectedStyle)
 
-      const response = await fetch('/api/generate', {
+      const createResponse = await fetch('/api/generate', {
         method: 'POST',
         body: formData,
       })
 
-      const data = await response.json()
+      const createData = await createResponse.json()
 
-      if (response.ok && data.success) {
-        setResultImageUrl(data.imageUrl)
-        // Incrementar contador
-        const newCount = dailyCount + 1
-        setDailyCount(newCount)
-        saveDailyCount(newCount)
-      } else {
-        setError(data.error || '¡Ups! El sticker no salió bien 😅 ¡Intenta de nuevo!')
+      if (!createResponse.ok || !createData.success || !createData.taskId) {
+        setError(createData.error || '¡Ups! El sticker no salió bien 😅 ¡Intenta de nuevo!')
+        setIsGenerating(false)
+        return
       }
+
+      const taskId = createData.taskId
+
+      // Paso 2: Polling para obtener el resultado
+      const maxAttempts = 60 // 2 minutos máximo (2s entre intentos)
+      let attempts = 0
+
+      const pollForResult = async (): Promise<void> => {
+        while (attempts < maxAttempts) {
+          attempts++
+
+          try {
+            const statusResponse = await fetch(`/api/generate?taskId=${taskId}`)
+            const statusData = await statusResponse.json()
+
+            if (statusData.status === 'success' && statusData.imageUrl) {
+              setResultImageUrl(statusData.imageUrl)
+              // Incrementar contador
+              const newCount = dailyCount + 1
+              setDailyCount(newCount)
+              saveDailyCount(newCount)
+              setIsGenerating(false)
+              return
+            }
+
+            if (statusData.status === 'fail') {
+              setError(statusData.error || '¡Ups! El sticker no salió bien 😅 ¡Intenta de nuevo!')
+              setIsGenerating(false)
+              return
+            }
+
+            // Sigue esperando, esperar 2 segundos antes del siguiente intento
+            await new Promise(resolve => setTimeout(resolve, 2000))
+          } catch (pollError) {
+            console.error('Error en polling:', pollError)
+            // Continuar intentando
+            await new Promise(resolve => setTimeout(resolve, 2000))
+          }
+        }
+
+        // Si llegamos aquí, se agotaron los intentos
+        setError('¡Ups! Tardó mucho tiempo 😅 ¡Intenta de nuevo!')
+        setIsGenerating(false)
+      }
+
+      await pollForResult()
+
     } catch (error) {
       console.error('Error generando sticker:', error)
       setError('¡Ups! No puedo conectar 😅 ¡Intenta de nuevo!')
-    } finally {
       setIsGenerating(false)
     }
   }

@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 
-// Configuración para Vercel - extender timeout y tamaño del body
-export const maxDuration = 60 // 60 segundos máximo (requiere plan Pro para más)
 export const dynamic = 'force-dynamic'
 
 const COOKIE_NAME = 'amaya_session'
@@ -23,190 +21,106 @@ async function isAuthenticated(): Promise<boolean> {
   return !!session?.value
 }
 
-// Esperar un tiempo determinado
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-// Subir imagen a un servicio temporal y obtener URL pública
-async function uploadImageToTempHost(imageBuffer: Buffer, filename: string, mimeType: string): Promise<string | null> {
+// GET: Consultar estado de una tarea
+export async function GET(request: NextRequest) {
   try {
-    // Convertir Buffer a Uint8Array para compatibilidad con Blob
-    const uint8Array = new Uint8Array(imageBuffer)
-
-    // Usar file.io como servicio de hosting temporal (la imagen expira después de una descarga)
-    const formData = new FormData()
-    const blob = new Blob([uint8Array], { type: mimeType })
-    formData.append('file', blob, filename)
-
-    const response = await fetch('https://file.io', {
-      method: 'POST',
-      body: formData,
-    })
-
-    if (response.ok) {
-      const data = await response.json()
-      if (data.success && data.link) {
-        return data.link
-      }
+    if (!await isAuthenticated()) {
+      return NextResponse.json({ error: '¡Necesitas iniciar sesión! 🔑' }, { status: 401 })
     }
 
-    // Fallback: intentar con tmpfiles.org
-    const tmpFormData = new FormData()
-    tmpFormData.append('file', blob, filename)
-
-    const tmpResponse = await fetch('https://tmpfiles.org/api/v1/upload', {
-      method: 'POST',
-      body: tmpFormData,
-    })
-
-    if (tmpResponse.ok) {
-      const tmpData = await tmpResponse.json()
-      if (tmpData.status === 'success' && tmpData.data?.url) {
-        // tmpfiles.org devuelve URLs como https://tmpfiles.org/123456/imagen.png
-        // pero la URL directa es https://tmpfiles.org/dl/123456/imagen.png
-        return tmpData.data.url.replace('tmpfiles.org/', 'tmpfiles.org/dl/')
-      }
+    const apiKey = process.env.KIE_API_KEY
+    if (!apiKey) {
+      return NextResponse.json({ error: '¡Ups! Algo salió mal 😅' }, { status: 500 })
     }
 
-    return null
-  } catch (error) {
-    console.error('Error subiendo imagen a host temporal:', error)
-    return null
-  }
-}
+    const taskId = request.nextUrl.searchParams.get('taskId')
+    if (!taskId) {
+      return NextResponse.json({ error: 'Falta taskId' }, { status: 400 })
+    }
 
-// Consultar estado de la tarea
-async function checkTaskStatus(taskId: string, apiKey: string): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
-  const maxAttempts = 25 // Máximo 25 intentos (50 segundos con 2s de espera)
+    const response = await fetch(`${KIE_STATUS_URL}?taskId=${taskId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+      },
+    })
 
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
-      const response = await fetch(`${KIE_STATUS_URL}?taskId=${taskId}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-        },
+    if (!response.ok) {
+      return NextResponse.json({ error: '¡Ups! Error consultando estado 😅' }, { status: 500 })
+    }
+
+    const data = await response.json()
+
+    if (data.code !== 200) {
+      return NextResponse.json({ error: data.msg || 'Error desconocido' }, { status: 500 })
+    }
+
+    const state = data.data?.state
+
+    if (state === 'success') {
+      const resultJson = JSON.parse(data.data.resultJson || '{}')
+      const imageUrl = resultJson.resultUrls?.[0]
+      return NextResponse.json({ status: 'success', imageUrl })
+    }
+
+    if (state === 'fail') {
+      return NextResponse.json({
+        status: 'fail',
+        error: data.data?.failMsg || '¡Ups! El sticker no salió bien 😅'
       })
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-
-      const data = await response.json()
-
-      if (data.code !== 200) {
-        throw new Error(data.msg || 'Error desconocido')
-      }
-
-      const state = data.data?.state
-
-      if (state === 'success') {
-        // Parsear el resultado
-        const resultJson = JSON.parse(data.data.resultJson || '{}')
-        const imageUrl = resultJson.resultUrls?.[0]
-
-        if (imageUrl) {
-          return { success: true, imageUrl }
-        } else {
-          return { success: false, error: 'No se generó imagen' }
-        }
-      }
-
-      if (state === 'fail') {
-        return {
-          success: false,
-          error: data.data?.failMsg || '¡Ups! El sticker no salió bien 😅 ¡Intenta de nuevo!'
-        }
-      }
-
-      // Si está en "waiting", seguir esperando
-      await delay(2000) // Esperar 2 segundos entre intentos
-    } catch (error) {
-      console.error('Error verificando estado:', error)
-      // Continuar intentando
-      await delay(2000)
     }
-  }
 
-  return { success: false, error: '¡Ups! Tardó mucho tiempo 😅 ¡Intenta de nuevo!' }
+    // Sigue en proceso
+    return NextResponse.json({ status: 'waiting' })
+
+  } catch (error) {
+    console.error('Error consultando tarea:', error)
+    return NextResponse.json({ error: '¡Ups! Algo salió mal 😅' }, { status: 500 })
+  }
 }
 
+// POST: Crear nueva tarea de generación
 export async function POST(request: NextRequest) {
   try {
-    // Verificar autenticación
     if (!await isAuthenticated()) {
-      return NextResponse.json(
-        { error: '¡Necesitas iniciar sesión! 🔑' },
-        { status: 401 }
-      )
+      return NextResponse.json({ error: '¡Necesitas iniciar sesión! 🔑' }, { status: 401 })
     }
 
-    // Obtener API key
     const apiKey = process.env.KIE_API_KEY
     if (!apiKey) {
       console.error('KIE_API_KEY no está configurado')
-      return NextResponse.json(
-        { error: '¡Ups! Algo salió mal con la configuración 😅' },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: '¡Ups! Algo salió mal con la configuración 😅' }, { status: 500 })
     }
 
-    // Obtener datos del formulario
     const formData = await request.formData()
     const image = formData.get('image') as File
     const style = formData.get('style') as string
 
-    // Validaciones
     if (!image) {
-      return NextResponse.json(
-        { error: '¡Necesitas subir una foto! 📷' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: '¡Necesitas subir una foto! 📷' }, { status: 400 })
     }
 
     if (!style || !STYLE_PROMPTS[style]) {
-      return NextResponse.json(
-        { error: '¡Elige un estilo para tu sticker! 🎨' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: '¡Elige un estilo para tu sticker! 🎨' }, { status: 400 })
     }
 
-    // Validar tipo de imagen
     const validTypes = ['image/jpeg', 'image/png', 'image/webp']
     if (!validTypes.includes(image.type)) {
-      return NextResponse.json(
-        { error: '¡Ups! Solo puedes subir fotos (JPG, PNG o WebP) 📸' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: '¡Ups! Solo puedes subir fotos (JPG, PNG o WebP) 📸' }, { status: 400 })
     }
 
-    // Validar tamaño (4MB para evitar problemas con el límite de Vercel)
+    // Límite de 4MB para mantenernos dentro del límite de Vercel (4.5MB)
     const maxSize = 4 * 1024 * 1024
     if (image.size > maxSize) {
-      return NextResponse.json(
-        { error: 'Esta foto es muy grande, prueba con otra más pequeña 📸' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Esta foto es muy grande, prueba con otra más pequeña 📸' }, { status: 400 })
     }
 
-    // Convertir imagen a buffer
-    const imageBuffer = Buffer.from(await image.arrayBuffer())
+    // Convertir imagen a base64 data URL
+    const imageBuffer = await image.arrayBuffer()
+    const base64Image = Buffer.from(imageBuffer).toString('base64')
+    const dataUrl = `data:${image.type};base64,${base64Image}`
 
-    // Subir imagen a servicio temporal para obtener URL pública
-    const extension = image.type.split('/')[1] || 'png'
-    const tempFilename = `sticker-${Date.now()}.${extension}`
-    const publicImageUrl = await uploadImageToTempHost(imageBuffer, tempFilename, image.type)
-
-    if (!publicImageUrl) {
-      console.error('No se pudo subir la imagen a un host temporal')
-      return NextResponse.json(
-        { error: '¡Ups! No pudimos procesar la foto 😅 ¡Intenta de nuevo!' },
-        { status: 500 }
-      )
-    }
-
-    console.log('Imagen subida a:', publicImageUrl)
+    console.log('Enviando imagen a Kie.ai, tamaño:', image.size, 'tipo:', image.type)
 
     // Crear tarea en Kie.ai
     const createTaskResponse = await fetch(KIE_API_URL, {
@@ -219,76 +133,50 @@ export async function POST(request: NextRequest) {
         model: 'google/nano-banana-edit',
         input: {
           prompt: STYLE_PROMPTS[style],
-          image_urls: [publicImageUrl],
+          image_urls: [dataUrl],
           output_format: 'png',
           image_size: '1:1',
         },
       }),
     })
 
-    if (!createTaskResponse.ok) {
-      const errorText = await createTaskResponse.text()
-      console.error('Error creando tarea en Kie.ai:', createTaskResponse.status, errorText)
+    const responseText = await createTaskResponse.text()
+    console.log('Respuesta de Kie.ai:', createTaskResponse.status, responseText)
 
-      // Manejar errores específicos de la API
+    if (!createTaskResponse.ok) {
       if (createTaskResponse.status === 401) {
-        return NextResponse.json(
-          { error: '¡Ups! Hay un problema con la configuración 😅' },
-          { status: 500 }
-        )
+        return NextResponse.json({ error: '¡Ups! Hay un problema con la API Key 😅' }, { status: 500 })
       }
       if (createTaskResponse.status === 402) {
-        return NextResponse.json(
-          { error: '¡Ups! Se acabaron los créditos 😅' },
-          { status: 500 }
-        )
+        return NextResponse.json({ error: '¡Ups! Se acabaron los créditos de Kie.ai 😅' }, { status: 500 })
       }
       if (createTaskResponse.status === 429) {
-        return NextResponse.json(
-          { error: '¡Espera un momento! Hay muchas solicitudes 😅' },
-          { status: 429 }
-        )
+        return NextResponse.json({ error: '¡Espera un momento! Hay muchas solicitudes 😅' }, { status: 429 })
       }
-
-      return NextResponse.json(
-        { error: '¡Ups! El sticker no salió bien 😅 ¡Intenta de nuevo!' },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: '¡Ups! El sticker no salió bien 😅 ¡Intenta de nuevo!' }, { status: 500 })
     }
 
-    const createTaskData = await createTaskResponse.json()
-    console.log('Respuesta de Kie.ai:', createTaskData)
+    let createTaskData
+    try {
+      createTaskData = JSON.parse(responseText)
+    } catch {
+      console.error('Error parseando respuesta:', responseText)
+      return NextResponse.json({ error: '¡Ups! Respuesta inválida de Kie.ai 😅' }, { status: 500 })
+    }
 
     if (createTaskData.code !== 200 || !createTaskData.data?.taskId) {
       console.error('Respuesta inesperada de Kie.ai:', createTaskData)
-      return NextResponse.json(
-        { error: '¡Ups! El sticker no salió bien 😅 ¡Intenta de nuevo!' },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: '¡Ups! El sticker no salió bien 😅 ¡Intenta de nuevo!' }, { status: 500 })
     }
 
-    // Esperar y verificar el resultado
-    const taskId = createTaskData.data.taskId
-    console.log('Task ID:', taskId)
+    // Devolver el taskId para que el cliente haga polling
+    return NextResponse.json({
+      success: true,
+      taskId: createTaskData.data.taskId,
+    })
 
-    const result = await checkTaskStatus(taskId, apiKey)
-
-    if (result.success && result.imageUrl) {
-      return NextResponse.json({
-        success: true,
-        imageUrl: result.imageUrl,
-      })
-    } else {
-      return NextResponse.json(
-        { error: result.error || '¡Ups! El sticker no salió bien 😅 ¡Intenta de nuevo!' },
-        { status: 500 }
-      )
-    }
   } catch (error) {
     console.error('Error generando sticker:', error)
-    return NextResponse.json(
-      { error: '¡Ups! El sticker no salió bien 😅 ¡Intenta de nuevo!' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: '¡Ups! El sticker no salió bien 😅 ¡Intenta de nuevo!' }, { status: 500 })
   }
 }
