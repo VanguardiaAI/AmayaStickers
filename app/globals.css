@@ -1,0 +1,112 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 51, 51, 51;
+  --background-gradient-start: #fce4ec;
+  --background-gradient-end: #f3e5f5;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: linear-gradient(135deg, var(--background-gradient-start), var(--background-gradient-end));
+  min-height: 100vh;
+  font-family: 'Nunito', sans-serif;
+}
+
+/* Animación de las tijeras girando */
+@keyframes scissors-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.scissors-spin {
+  animation: scissors-spin 1s linear infinite;
+  display: inline-block;
+}
+
+/* Animación de pulso suave */
+@keyframes soft-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.soft-pulse {
+  animation: soft-pulse 2s ease-in-out infinite;
+}
+
+/* Estilos para el input de PIN */
+.pin-input {
+  @apply w-12 h-14 text-center text-2xl font-bold rounded-xl border-2 border-pink-300
+         focus:border-purple-400 focus:outline-none focus:ring-2 focus:ring-purple-200
+         bg-white/80 backdrop-blur transition-all duration-200;
+}
+
+.pin-input:focus {
+  transform: scale(1.05);
+}
+
+/* Botón principal con hover bonito */
+.btn-primary {
+  @apply bg-gradient-to-r from-pink-400 to-purple-400 text-white font-bold py-4 px-8
+         rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300
+         hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed
+         disabled:hover:scale-100;
+}
+
+/* Botones de estilo */
+.style-btn {
+  @apply flex flex-col items-center justify-center p-4 rounded-2xl border-2
+         bg-white/70 backdrop-blur transition-all duration-300 hover:scale-105
+         active:scale-95 cursor-pointer min-h-[80px];
+}
+
+.style-btn.selected {
+  @apply border-purple-500 bg-purple-100/80 shadow-lg;
+}
+
+.style-btn:not(.selected) {
+  @apply border-pink-200 hover:border-pink-400;
+}
+
+/* Zona de drag & drop */
+.dropzone {
+  @apply border-2 border-dashed border-pink-300 rounded-3xl p-8 text-center
+         bg-white/50 backdrop-blur transition-all duration-300 cursor-pointer;
+}
+
+.dropzone:hover, .dropzone.drag-over {
+  @apply border-purple-400 bg-purple-50/50 scale-[1.02];
+}
+
+/* Card contenedor */
+.card {
+  @apply bg-white/80 backdrop-blur-lg rounded-3xl shadow-xl p-6;
+}
+
+/* Mensaje de error amigable */
+.error-message {
+  @apply bg-red-100/80 text-red-600 p-4 rounded-2xl text-center font-medium;
+}
+
+/* Mensaje de éxito */
+.success-message {
+  @apply bg-green-100/80 text-green-600 p-4 rounded-2xl text-center font-medium;
+}
+
+/* Contador de stickers restantes */
+.remaining-counter {
+  @apply inline-flex items-center gap-2 bg-white/80 backdrop-blur px-4 py-2
+         rounded-full shadow-md font-semibold text-purple-600;
+}
